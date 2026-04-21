@@ -1,0 +1,1562 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>旅游行程计划统计表 · Travel Planner</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<style>
+  :root{
+    --bg:#f5f7fb;
+    --panel:#ffffff;
+    --border:#e5e9f0;
+    --text:#1f2937;
+    --muted:#6b7280;
+    --primary:#2563eb;
+    --primary-soft:#dbeafe;
+    --accent:#0ea5e9;
+    --success:#10b981;
+    --warning:#f59e0b;
+    --danger:#ef4444;
+    --shadow:0 2px 12px rgba(15,23,42,.06);
+    --radius:10px;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    background:var(--bg);color:var(--text);font-size:14px;line-height:1.5;
+  }
+  .header{
+    background:linear-gradient(135deg,#2563eb 0%,#0ea5e9 100%);
+    color:#fff;padding:24px 32px;box-shadow:var(--shadow);
+  }
+  .header-inner{max-width:1440px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+  .header h1{margin:0;font-size:22px;font-weight:600;letter-spacing:.5px}
+  .header .subtitle{opacity:.9;font-size:13px;margin-top:4px}
+  .header-actions{display:flex;align-items:center;gap:10px}
+
+  .lock-btn{display:none} /* 已废弃，改用行级锁 */
+
+  /* ===== 行级锁定（更醒目） ===== */
+  tr.item-locked .cell-input{
+    pointer-events:none;background:transparent !important;
+    border-color:transparent !important;color:#78350f;font-weight:500;
+  }
+  tr.item-locked select.cell-input{appearance:none;background:transparent !important}
+  tr.item-locked .del-btn,
+  tr.item-locked .done-tag,
+  tr.item-locked .color-dot{
+    pointer-events:none;opacity:.45;cursor:not-allowed;filter:grayscale(.3);
+  }
+  tr.item-locked td{
+    background:linear-gradient(90deg,#fef3c7 0%,#fffbeb 100%) !important;
+    border-bottom:1px solid #fcd34d !important;
+  }
+  tr.item-locked:hover td{background:linear-gradient(90deg,#fde68a 0%,#fef3c7 100%) !important}
+
+  /* 已完成行：整体淡化 + 名称划线 */
+  tr.item-done td{opacity:.78}
+  tr.item-done .name-input{text-decoration:line-through;color:var(--muted)}
+  tr.item-done .note-input{color:#9ca3af}
+  /* 左侧金黄锁定条（优先级高于颜色条） */
+  tr.item-locked td:first-child{
+    box-shadow:inset 5px 0 0 0 #f59e0b !important;position:relative;
+  }
+  tr.item-locked td:first-child::after{
+    content:"🔒";position:absolute;left:14px;top:50%;transform:translateY(-50%);
+    font-size:11px;opacity:.7;
+  }
+
+  /* 锁按钮（行首）— 更醒目 */
+  .lock-toggle{
+    background:#fff;border:1.5px solid #e5e9f0;cursor:pointer;
+    width:28px;height:28px;border-radius:8px;padding:0;font-size:13px;
+    display:inline-flex;align-items:center;justify-content:center;
+    color:var(--muted);transition:all .15s;
+  }
+  .lock-toggle:hover{background:#f1f5f9;color:var(--text);border-color:#cbd5e1;transform:scale(1.05)}
+  .lock-toggle.is-locked{
+    background:#f59e0b;border-color:#d97706;color:#fff;
+    box-shadow:0 2px 6px rgba(245,158,11,.4);
+  }
+  .lock-toggle.is-locked:hover{
+    background:#d97706;border-color:#b45309;
+    box-shadow:0 4px 10px rgba(245,158,11,.6);
+  }
+  .container{max-width:1440px;margin:0 auto;padding:20px}
+
+  /* ===== Trip meta ===== */
+  .meta-card{
+    background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    padding:18px 20px;margin-bottom:16px;box-shadow:var(--shadow);
+  }
+  .meta-row{display:grid;grid-template-columns:repeat(6,1fr);gap:14px}
+  .meta-row label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--muted)}
+  .meta-row input{
+    border:1px dashed #cbd5e1;border-radius:6px;padding:7px 10px;font-size:14px;
+    background:#fff;color:var(--text);transition:border-color .15s;
+  }
+  .meta-row input:focus{outline:none;border:1px solid var(--primary);box-shadow:0 0 0 3px rgba(37,99,235,.12)}
+
+  /* ===== Stats cards ===== */
+  .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-bottom:16px}
+  .stat{
+    background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    padding:16px 18px;box-shadow:var(--shadow);position:relative;overflow:hidden;
+  }
+  .stat::before{content:"";position:absolute;left:0;top:0;width:4px;height:100%;background:var(--primary)}
+  .stat.success::before{background:var(--success)}
+  .stat.warning::before{background:var(--warning)}
+  .stat.accent::before{background:var(--accent)}
+  .stat.danger::before{background:var(--danger)}
+  .stat .label{font-size:12px;color:var(--muted)}
+  .stat .value{font-size:24px;font-weight:600;margin-top:6px}
+  .stat .sub{font-size:11px;color:var(--muted);margin-top:2px}
+
+  /* ===== Main grid: table + charts ===== */
+  .main-grid{display:grid;grid-template-columns:1fr 380px;gap:16px}
+  @media (max-width:1100px){.main-grid{grid-template-columns:1fr}.stats{grid-template-columns:repeat(2,1fr)}.meta-row{grid-template-columns:repeat(2,1fr)}}
+
+  .panel{
+    background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);
+    box-shadow:var(--shadow);overflow:hidden;
+  }
+  .panel-header{
+    padding:14px 18px;border-bottom:1px solid var(--border);
+    display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;
+  }
+  .panel-header h3{margin:0;font-size:15px;font-weight:600}
+  .panel-body{padding:14px 18px}
+
+  .btn{
+    border:1px solid var(--border);background:#fff;color:var(--text);
+    padding:7px 13px;border-radius:6px;cursor:pointer;font-size:13px;
+    transition:all .15s;display:inline-flex;align-items:center;gap:5px;
+  }
+  .btn:hover{border-color:var(--primary);color:var(--primary)}
+  .btn.primary{background:var(--primary);color:#fff;border-color:var(--primary)}
+  .btn.primary:hover{background:#1d4ed8;color:#fff}
+  .btn.danger{color:var(--danger);border-color:#fecaca}
+  .btn.danger:hover{background:#fef2f2}
+  .btn.ghost{background:transparent;border-color:transparent;color:var(--muted)}
+  .btn.ghost:hover{background:#f3f4f6;color:var(--text)}
+
+  /* ===== Table ===== */
+  .table-wrap{overflow-x:hidden}
+  table.plan{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+  table.plan thead th{
+    background:#f8fafc;color:var(--muted);font-weight:500;text-align:left;
+    padding:10px 8px;border-bottom:2px solid var(--border);white-space:nowrap;font-size:12px;
+    position:sticky;top:0;z-index:2;
+  }
+  table.plan tbody td{
+    padding:4px 6px;border-bottom:1px solid #f1f5f9;vertical-align:middle;
+    word-break:break-word;overflow:hidden;
+  }
+  table.plan tbody tr:hover{background:#f8fafc}
+  .day-row td{
+    background:linear-gradient(90deg,#eff6ff 0%,#ffffff 100%);
+    font-weight:600;color:var(--primary);padding:10px 14px;font-size:13px;
+  }
+  .day-row-content{display:flex;align-items:center;gap:10px;flex-wrap:wrap;width:100%}
+  .day-row-content .day-label-input{
+    flex:1 1 300px;min-width:280px;max-width:560px;width:auto;
+    font-weight:600;color:var(--primary);font-size:14px;
+    padding:6px 10px;
+  }
+  .day-row-content .day-date-input{flex:0 0 auto;width:160px}
+  .day-row .day-actions{margin-left:auto;font-weight:normal;display:flex;gap:6px}
+
+  /* ===== 当日总览条（仅交通 + 住宿） ===== */
+  tr.day-summary td{
+    background:#fafbfc;border-bottom:1px solid #eef2f7;padding:10px 16px 12px;
+  }
+  .day-summary-inner{
+    display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:12.5px;
+  }
+  @media (max-width:900px){.day-summary-inner{grid-template-columns:1fr}}
+  .sum-group{
+    background:#fff;border:1px solid #e5e9f0;border-radius:8px;
+    padding:8px 12px 10px;display:flex;flex-direction:column;gap:4px;
+  }
+  .sum-label{
+    font-size:11px;font-weight:600;letter-spacing:.4px;
+    display:inline-flex;align-items:center;gap:4px;margin-bottom:2px;
+  }
+  .sum-label-transit{color:#1d4ed8}
+  .sum-label-stay{color:#92400e}
+  .sum-list{list-style:none;padding:0;margin:0;display:flex;flex-direction:column;gap:3px}
+  .sum-list li{
+    display:flex;align-items:baseline;gap:6px;flex-wrap:wrap;
+    padding:2px 0;color:var(--text);line-height:1.5;
+  }
+  .sum-list li::before{
+    content:"•";color:#cbd5e1;font-weight:700;
+  }
+  .sum-time{
+    font-variant-numeric:tabular-nums;color:var(--muted);font-size:11.5px;
+    background:#eef2f7;padding:1px 6px;border-radius:4px;
+  }
+  .sum-name{font-weight:500;color:var(--text)}
+  .sum-note{color:var(--muted);font-size:11.5px}
+  /* 项目名 + 详情 双行单元格 */
+  .col-name-note{padding:6px 4px !important}
+  .col-name-note .name-input{font-weight:500;color:var(--text);margin-bottom:2px}
+  .col-name-note .note-input{font-size:12px;color:var(--muted)}
+  .cell-input{
+    width:100%;border:1px dashed transparent;border-radius:4px;padding:6px 8px;
+    font-size:13px;background:transparent;color:var(--text);
+    text-overflow:ellipsis;
+  }
+  .cell-input:hover{border-color:#cbd5e1;background:#fff}
+  .cell-input:focus{
+    outline:none;border:1px dashed var(--primary);background:#fff;
+    box-shadow:0 0 0 2px rgba(37,99,235,.1);
+    /* 聚焦时放大显示，避免长文本被截断 */
+    position:relative;z-index:3;min-width:100%;width:auto;
+  }
+  select.cell-input{cursor:pointer;background:#fff;border-color:transparent}
+  select.cell-input:hover{border-color:#cbd5e1}
+  .cost-input{text-align:right;font-variant-numeric:tabular-nums}
+
+  .tag{
+    display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;
+    background:#eef2ff;color:#4338ca;
+  }
+  .tag-交通{background:#dbeafe;color:#1d4ed8}
+  .tag-住宿{background:#fef3c7;color:#92400e}
+  .tag-餐饮{background:#fee2e2;color:#b91c1c}
+  .tag-门票{background:#ddd6fe;color:#6d28d9}
+  .tag-购物{background:#fce7f3;color:#be185d}
+  .tag-娱乐{background:#d1fae5;color:#065f46}
+  .tag-其他{background:#e5e7eb;color:#374151}
+
+  .col-actions{width:60px;text-align:center}
+  .del-btn{
+    background:transparent;border:none;cursor:pointer;color:var(--muted);
+    font-size:16px;padding:2px 6px;border-radius:4px;
+  }
+  .del-btn:hover{background:#fee2e2;color:var(--danger)}
+
+  /* 自定义颜色标记 */
+  .col-color{text-align:center;vertical-align:middle}
+  .color-dot{
+    width:18px;height:18px;border-radius:50%;
+    border:1.5px dashed #cbd5e1;background:#fff;color:#94a3b8;
+    font-size:11px;cursor:pointer;padding:0;
+    display:inline-flex;align-items:center;justify-content:center;
+    transition:all .15s;
+  }
+  .color-dot:hover{transform:scale(1.15);border-color:var(--primary);color:var(--primary)}
+  .color-popover{
+    position:fixed;background:#fff;border:1px solid var(--border);border-radius:10px;
+    box-shadow:0 8px 24px rgba(0,0,0,.15);padding:12px;z-index:1100;
+    display:none;min-width:200px;
+  }
+  .color-popover.show{display:block}
+  .color-popover-title{font-size:11px;color:var(--muted);margin-bottom:8px;font-weight:500}
+  .color-palette{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin-bottom:10px}
+  .color-swatch{
+    width:22px;height:22px;border-radius:50%;cursor:pointer;
+    border:2px solid transparent;transition:transform .1s;
+  }
+  .color-swatch:hover{transform:scale(1.2)}
+  .color-swatch.active{border-color:#1f2937;box-shadow:0 0 0 2px #fff inset}
+  .color-popover-footer{display:flex;gap:6px;align-items:center;font-size:12px}
+  .color-popover-footer input[type=color]{
+    width:28px;height:22px;padding:0;border:1px solid var(--border);border-radius:4px;cursor:pointer;
+  }
+  .color-popover-footer .color-clear{
+    background:transparent;border:1px solid var(--border);padding:3px 10px;border-radius:4px;
+    font-size:12px;cursor:pointer;color:var(--muted);
+  }
+  .color-popover-footer .color-clear:hover{background:#f3f4f6;color:var(--danger)}
+
+  /* 完成状态按钮（红=已完成 / 绿=未完成），更醒目 */
+  .done-tag{
+    display:inline-flex;align-items:center;justify-content:center;
+    min-width:76px;padding:6px 12px;border-radius:16px;
+    font-size:12.5px;font-weight:700;letter-spacing:.4px;
+    border:1.5px solid transparent;cursor:pointer;user-select:none;
+    transition:all .15s ease;white-space:nowrap;
+  }
+  .done-tag.is-done{
+    background:#dc2626;color:#fff;border-color:#b91c1c;
+    box-shadow:0 2px 6px rgba(220,38,38,.3);
+  }
+  .done-tag.is-done:hover{
+    background:#b91c1c;border-color:#991b1b;
+    box-shadow:0 4px 12px rgba(220,38,38,.5);transform:translateY(-1px);
+  }
+  .done-tag.is-todo{
+    background:#16a34a;color:#fff;border-color:#15803d;
+    box-shadow:0 2px 6px rgba(22,163,74,.3);
+  }
+  .done-tag.is-todo:hover{
+    background:#15803d;border-color:#166534;
+    box-shadow:0 4px 12px rgba(22,163,74,.5);transform:translateY(-1px);
+  }
+
+  .empty{padding:40px;text-align:center;color:var(--muted)}
+
+  /* ===== Booking tables (hotel / flight) ===== */
+  .booking-panel{margin-top:16px}
+  table.booking-table{width:100%;border-collapse:collapse;font-size:13px;table-layout:fixed}
+  table.booking-table thead th{
+    background:#f8fafc;color:var(--muted);font-weight:500;text-align:left;
+    padding:10px 8px;border-bottom:2px solid var(--border);white-space:nowrap;font-size:12px;
+  }
+  table.booking-table tbody td{
+    padding:4px 6px;border-bottom:1px solid #f1f5f9;vertical-align:middle;
+    word-break:break-word;overflow:hidden;
+  }
+  table.booking-table tbody tr:hover{background:#f8fafc}
+  .booking-empty{padding:24px;text-align:center;color:var(--muted);font-size:13px}
+
+  /* ===== Charts ===== */
+  .chart-box{height:260px;position:relative;margin-bottom:10px}
+  .chart-box.small{height:180px}
+  .legend-list{display:flex;flex-direction:column;gap:6px;font-size:12px;margin-top:10px}
+  .legend-item{display:flex;align-items:center;justify-content:space-between}
+  .legend-left{display:flex;align-items:center;gap:8px}
+  .legend-dot{width:10px;height:10px;border-radius:2px}
+
+  /* ===== Toolbar ===== */
+  .toolbar{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+
+  /* checklist */
+  .checklist{display:grid;grid-template-columns:repeat(2,1fr);gap:6px 16px;font-size:13px}
+  .checklist label{display:flex;align-items:center;gap:6px;cursor:pointer}
+  .checklist input{margin:0}
+
+  footer{text-align:center;color:var(--muted);font-size:12px;padding:20px 0}
+
+  /* tips */
+  .toast{
+    position:fixed;bottom:24px;right:24px;background:#1f2937;color:#fff;
+    padding:10px 16px;border-radius:8px;font-size:13px;opacity:0;
+    transform:translateY(10px);transition:all .25s;pointer-events:none;z-index:999;
+    max-width:360px;box-shadow:0 8px 24px rgba(0,0,0,.2);
+  }
+  .toast.show{opacity:1;transform:translateY(0)}
+  .toast.success{background:var(--success)}
+  .toast.warning{background:var(--warning)}
+  .toast.danger{background:var(--danger)}
+
+  /* info banner */
+  .info-banner{
+    position:sticky;top:0;background:linear-gradient(90deg,#dbeafe 0%,#e0f2fe 100%);
+    border-bottom:1px solid #bfdbfe;z-index:50;
+  }
+  .info-banner-inner{
+    max-width:1440px;margin:0 auto;padding:10px 24px;
+    display:flex;align-items:center;justify-content:space-between;gap:12px;
+    font-size:13px;color:#1e40af;
+  }
+  .info-banner-close{
+    background:transparent;border:none;cursor:pointer;color:#1e40af;
+    font-size:16px;padding:2px 6px;border-radius:4px;
+  }
+  .info-banner-close:hover{background:rgba(30,64,175,.1)}
+
+  /* 排序下拉 */
+  .sort-select{
+    display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--muted);
+    background:#f8fafc;border:1px solid var(--border);border-radius:6px;padding:3px 8px;
+  }
+  .sort-select select{
+    border:none;background:transparent;font-size:13px;color:var(--text);cursor:pointer;
+    padding:4px 4px;outline:none;
+  }
+
+  /* 帮助图标 */
+  .help-icon{
+    display:inline-flex;align-items:center;justify-content:center;
+    width:18px;height:18px;border-radius:50%;background:#e0f2fe;color:#0369a1;
+    font-size:12px;font-style:normal;cursor:pointer;margin-left:6px;
+    font-weight:600;transition:all .15s;vertical-align:middle;
+  }
+  .help-icon:hover{background:#0ea5e9;color:#fff;transform:scale(1.1)}
+
+  /* 模态框 */
+  .modal-overlay{
+    display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);
+    z-index:1000;align-items:center;justify-content:center;padding:20px;
+    animation:fadeIn .15s ease;
+  }
+  .modal-overlay.show{display:flex}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+  @keyframes slideUp{from{transform:translateY(10px);opacity:0}to{transform:translateY(0);opacity:1}}
+  .modal{
+    background:#fff;border-radius:12px;max-width:560px;width:100%;
+    box-shadow:0 20px 60px rgba(0,0,0,.3);animation:slideUp .2s ease;
+    max-height:85vh;display:flex;flex-direction:column;
+  }
+  .modal-header{
+    padding:16px 20px;border-bottom:1px solid var(--border);
+    display:flex;align-items:center;justify-content:space-between;
+  }
+  .modal-header h3{margin:0;font-size:16px;font-weight:600}
+  .modal-close{
+    background:transparent;border:none;cursor:pointer;font-size:18px;
+    color:var(--muted);padding:4px 8px;border-radius:4px;
+  }
+  .modal-close:hover{background:#f3f4f6;color:var(--text)}
+  .modal-body{padding:18px 20px;font-size:14px;line-height:1.65;color:var(--text);overflow-y:auto}
+  .modal-body ul{padding-left:20px;margin:10px 0}
+  .modal-body li{margin:6px 0}
+  .modal-body code{
+    background:#f1f5f9;padding:1px 6px;border-radius:3px;font-size:12px;
+    color:#334155;font-family:Consolas,Monaco,monospace;
+  }
+  .modal-body kbd{
+    background:#f1f5f9;border:1px solid #cbd5e1;border-bottom-width:2px;
+    border-radius:4px;padding:1px 6px;font-size:11px;font-family:inherit;
+  }
+  .modal-footer{
+    padding:12px 20px;border-top:1px solid var(--border);
+    display:flex;justify-content:flex-end;gap:8px;
+  }
+
+  /* people split */
+  .split-table{width:100%;font-size:13px;border-collapse:collapse}
+  .split-table td{padding:6px 8px;border-bottom:1px solid #f1f5f9}
+  .split-table td:last-child{text-align:right;font-weight:500}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div class="header-inner">
+    <div>
+      <h1>🗺️ 旅游行程计划统计表</h1>
+      <div class="subtitle">规划 · 分日安排 · 预算统计 · 支出分摊 · 一键导出</div>
+    </div>
+  </div>
+</div>
+
+<div class="container">
+
+  <!-- Trip Meta -->
+  <div class="meta-card">
+    <div class="meta-row">
+      <label>🎯 行程名称
+        <input id="meta-title" type="text" placeholder="例：日本关西 7 日游" />
+      </label>
+      <label>📍 目的地
+        <input id="meta-dest" type="text" placeholder="例：大阪、京都、奈良" />
+      </label>
+      <label>📅 出发日期
+        <input id="meta-start" type="date" />
+      </label>
+      <label>📅 返程日期
+        <input id="meta-end" type="date" />
+      </label>
+      <label>👥 出行人数
+        <input id="meta-people" type="number" min="1" value="2" />
+      </label>
+      <label>💱 币种
+        <input id="meta-currency" type="text" value="¥" maxlength="4" />
+      </label>
+    </div>
+  </div>
+
+  <!-- Stats -->
+  <div class="stats" id="stats">
+    <div class="stat"><div class="label">总预算</div><div class="value" id="stat-total">¥0</div><div class="sub" id="stat-total-sub">共 0 项支出</div></div>
+    <div class="stat accent"><div class="label">人均花费</div><div class="value" id="stat-perperson">¥0</div><div class="sub" id="stat-perperson-sub">按 0 人均分</div></div>
+    <div class="stat success"><div class="label">日均花费</div><div class="value" id="stat-perday">¥0</div><div class="sub" id="stat-perday-sub">共 0 天</div></div>
+    <div class="stat warning"><div class="label">已完成</div><div class="value" id="stat-done">0 / 0</div><div class="sub" id="stat-done-sub">行程完成度</div></div>
+    <div class="stat danger"><div class="label">最大支出项</div><div class="value" id="stat-top" style="font-size:16px">—</div><div class="sub" id="stat-top-sub">—</div></div>
+  </div>
+
+  <!-- Main -->
+  <div class="main-grid">
+
+    <!-- Left: plan table -->
+    <div class="panel">
+      <div class="panel-header">
+        <h3>📋 行程安排 <span class="help-icon" onclick="showHelp()" title="查看使用帮助">ⓘ</span></h3>
+        <div class="toolbar">
+          <label class="sort-select" title="选择排序方式">
+            <span>排序</span>
+            <select id="sort-mode" onchange="changeSort(this.value)">
+              <option value="manual">手动 / 添加顺序</option>
+              <option value="time-asc">时间 升序 ↑</option>
+              <option value="time-desc">时间 降序 ↓</option>
+              <option value="price-desc">金额 高→低</option>
+              <option value="price-asc">金额 低→高</option>
+              <option value="type">按类型分组</option>
+              <option value="done">未完成优先</option>
+            </select>
+          </label>
+          <button class="btn" onclick="addDay()">+ 添加一天</button>
+          <button class="btn" onclick="addItem()">+ 新增条目</button>
+          <button class="btn ghost" onclick="loadSample()">加载示例</button>
+          <button class="btn ghost" onclick="loadNZTrip()" style="color:#2f6e44">🇳🇿 导入新西兰行程</button>
+          <button class="btn ghost" onclick="clearAll()">清空</button>
+          <button class="btn allow-locked" onclick="exportJSON()">导出 JSON</button>
+          <button class="btn primary allow-locked" onclick="exportExcel()">📊 导出 Excel</button>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table class="plan">
+          <thead>
+            <tr>
+              <th style="width:3%" title="自定义颜色标记">●</th>
+              <th style="width:7%">时间</th>
+              <th style="width:9%">类型</th>
+              <th style="width:40%">项目 / 地点 · 详情备注</th>
+              <th style="width:10%">单价</th>
+              <th style="width:7%">数量</th>
+              <th style="width:11%">小计</th>
+              <th style="width:7%">状态</th>
+              <th style="width:6%">🔒 ✕</th>
+            </tr>
+          </thead>
+          <tbody id="plan-body"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- Right: charts & checklist -->
+    <div>
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-header"><h3>💰 支出分类</h3></div>
+        <div class="panel-body">
+          <div class="chart-box"><canvas id="chart-category"></canvas></div>
+          <div class="legend-list" id="legend-category"></div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-header"><h3>📈 每日花费趋势</h3></div>
+        <div class="panel-body">
+          <div class="chart-box small"><canvas id="chart-day"></canvas></div>
+        </div>
+      </div>
+
+      <div class="panel" style="margin-bottom:16px">
+        <div class="panel-header"><h3>🧮 人均分摊</h3></div>
+        <div class="panel-body">
+          <table class="split-table" id="split-table"></table>
+        </div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-header"><h3>🎒 出行清单</h3></div>
+        <div class="panel-body">
+          <div class="checklist" id="checklist"></div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 酒店预订 -->
+  <div class="panel booking-panel">
+    <div class="panel-header">
+      <h3>🏨 酒店预订信息</h3>
+      <div class="toolbar">
+        <button class="btn" onclick="addHotel()">+ 新增酒店</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="booking-table">
+        <thead>
+          <tr>
+            <th style="width:15%">酒店名称</th>
+            <th style="width:15%">城市 / 地址</th>
+            <th style="width:10%">入住日期</th>
+            <th style="width:10%">退房日期</th>
+            <th style="width:6%">晚数</th>
+            <th style="width:12%">房型</th>
+            <th style="width:12%">确认号</th>
+            <th style="width:10%">总价</th>
+            <th style="width:8%">联系方式</th>
+            <th style="width:2%"></th>
+          </tr>
+        </thead>
+        <tbody id="hotel-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- 机票预订 -->
+  <div class="panel booking-panel">
+    <div class="panel-header">
+      <h3>✈️ 机票预订信息</h3>
+      <div class="toolbar">
+        <button class="btn" onclick="addFlight()">+ 新增航班</button>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="booking-table">
+        <thead>
+          <tr>
+            <th style="width:10%">航班号</th>
+            <th style="width:11%">航司</th>
+            <th style="width:10%">日期</th>
+            <th style="width:10%">起飞</th>
+            <th style="width:10%">到达</th>
+            <th style="width:9%">出发地</th>
+            <th style="width:9%">目的地</th>
+            <th style="width:11%">订单号 / PNR</th>
+            <th style="width:9%">座位</th>
+            <th style="width:9%">票价/人</th>
+            <th style="width:2%"></th>
+          </tr>
+        </thead>
+        <tbody id="flight-body"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>💡 数据自动保存在浏览器本地 · 双击单元格可编辑 · 导出 Excel 可分享给同行小伙伴</footer>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Info banner （滚动提示条） -->
+<div class="info-banner" id="info-banner" style="display:none">
+  <div class="info-banner-inner">
+    <span id="info-banner-msg"></span>
+    <button class="info-banner-close" onclick="hideBanner()">✕</button>
+  </div>
+</div>
+
+<!-- 自定义模态框：确认 / 帮助 -->
+<div class="modal-overlay" id="modal" onclick="if(event.target===this)closeModal()">
+  <div class="modal">
+    <div class="modal-header">
+      <h3 id="modal-title">提示</h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <div class="modal-body" id="modal-body"></div>
+    <div class="modal-footer" id="modal-footer"></div>
+  </div>
+</div>
+
+<!-- 颜色选择弹层 -->
+<div class="color-popover" id="color-popover">
+  <div class="color-popover-title">🎨 选择标记颜色</div>
+  <div class="color-palette" id="color-palette"></div>
+  <div class="color-popover-footer">
+    <label style="display:flex;align-items:center;gap:6px;color:var(--muted)">
+      <input type="color" id="color-custom" />
+      <span>自定义</span>
+    </label>
+    <button type="button" class="color-clear" onclick="applyColor('')">清除</button>
+  </div>
+</div>
+
+<script>
+/* ============ state ============ */
+const TYPES = ["交通","住宿","餐饮","门票","购物","娱乐","其他"];
+const TYPE_COLORS = {
+  "交通":"#3b82f6","住宿":"#f59e0b","餐饮":"#ef4444",
+  "门票":"#8b5cf6","购物":"#ec4899","娱乐":"#10b981","其他":"#6b7280"
+};
+const DEFAULT_CHECKLIST = [
+  "身份证 / 护照","机票 / 车票","酒店预订确认单","现金 / 银行卡","手机 + 充电器",
+  "充电宝","转换插头","常用药品","雨伞","洗漱用品","换洗衣物","相机","防晒霜","保险单"
+];
+
+let state = {
+  meta:{title:"",dest:"",start:"",end:"",people:2,currency:"¥"},
+  days:[],  // [{id, date, label, items:[{id,time,type,name,note,price,qty,done,color}]}]
+  hotels:[], // [{id,name,city,checkin,checkout,nights,room,confirm,total,phone}]
+  flights:[], // [{id,flightNo,airline,date,dep,arr,from,to,pnr,seat,price}]
+  checklist:[], // [{text,done}]
+  sortMode:"manual",
+  bannerDismissed:false,
+  locked:false,
+};
+
+const STORAGE_KEY = "travel_planner_v1";
+
+/* ============ util ============ */
+const $ = id=>document.getElementById(id);
+const uid = ()=>Math.random().toString(36).slice(2,10);
+const fmt = n => (state.meta.currency||"¥") + (Number(n)||0).toLocaleString("zh-CN",{maximumFractionDigits:2});
+
+function toast(msg,type){
+  const t=$("toast");t.textContent=msg;
+  t.className="toast show"+(type?" "+type:"");
+  clearTimeout(t._tm);t._tm=setTimeout(()=>t.classList.remove("show"),2200);
+}
+
+/* ===== 自定义模态 confirm ===== */
+function modalConfirm(opts){
+  return new Promise(resolve=>{
+    const {title="确认操作",message="",okText="确定",cancelText="取消",danger=false} = opts||{};
+    $("modal-title").textContent=title;
+    $("modal-body").innerHTML=message;
+    $("modal-footer").innerHTML=`
+      <button class="btn ghost" id="_modalCancel">${cancelText}</button>
+      <button class="btn ${danger?"danger":"primary"}" id="_modalOk">${okText}</button>`;
+    const modal=$("modal");modal.classList.add("show");
+    const cleanup=(v)=>{modal.classList.remove("show");resolve(v)};
+    $("_modalOk").onclick=()=>cleanup(true);
+    $("_modalCancel").onclick=()=>cleanup(false);
+  });
+}
+function modalAlert(opts){
+  return new Promise(resolve=>{
+    const {title="提示",message="",okText="好的"} = opts||{};
+    $("modal-title").textContent=title;
+    $("modal-body").innerHTML=message;
+    $("modal-footer").innerHTML=`<button class="btn primary" id="_modalOk">${okText}</button>`;
+    const modal=$("modal");modal.classList.add("show");
+    $("_modalOk").onclick=()=>{modal.classList.remove("show");resolve()};
+  });
+}
+function closeModal(){$("modal").classList.remove("show")}
+
+/* ===== 条目行级锁定 ===== */
+function toggleItemLock(did,iid){
+  const d=state.days.find(x=>x.id===did);if(!d)return;
+  const it=d.items.find(i=>i.id===iid);if(!it)return;
+  it.locked=!it.locked;
+  save();renderPlan();
+  toast(it.locked?"已锁定这一项 🔒":"已解锁 🔓",it.locked?"warning":"success");
+}
+
+/* ===== 帮助 / Banner ===== */
+function showHelp(){
+  modalAlert({
+    title:"📖 使用帮助",
+    message:`
+      <p><strong>行程安排</strong></p>
+      <ul>
+        <li>点击任意单元格直接编辑，失焦自动保存</li>
+        <li>类型列支持 <code>交通/住宿/餐饮/门票/购物/娱乐/其他</code> 七类，颜色自动区分</li>
+        <li>每条目最前面有 <strong>● 颜色圆点</strong>，点击可选 8 种预设色或自定义色（左侧会出现彩色竖条用于标记"重要/待确认/已预订"等）</li>
+        <li>"状态"列点一下就能切换已完成（红）/未完成（绿）</li>
+      </ul>
+      <p><strong>🔒 行级锁定 / 解锁</strong></p>
+      <ul>
+        <li>每条行程最右侧有 <code>🔓</code> 小锁按钮，点击可<strong>单独锁定这一条</strong></li>
+        <li>锁定后：该行底色变淡黄，所有输入、删除、切换完成、颜色修改都被禁用</li>
+        <li>其他未锁定的行照常可编辑，互不影响</li>
+        <li>适合把已确认的预订（比如已出票的机票、已订的酒店）锁起来防误改</li>
+        <li>再次点击同一按钮解锁</li>
+      </ul>
+      <p><strong>排序</strong></p>
+      <ul>
+        <li>右上角「排序」下拉选择排序模式</li>
+        <li><code>手动</code>：按添加顺序显示（默认）</li>
+        <li><code>时间升/降</code>：按每天内的时间排序</li>
+        <li><code>金额高→低</code>：找出最贵的支出</li>
+        <li><code>按类型分组</code>：把同类项目聚合在一起</li>
+        <li><code>未完成优先</code>：把待办事项放在每天前面</li>
+        <li>排序只影响显示顺序，不会改动你录入的数据</li>
+      </ul>
+      <p><strong>预订信息</strong></p>
+      <ul>
+        <li>🏨 酒店预订：入住/退房日期填好后自动算晚数</li>
+        <li>✈️ 机票预订：PNR、座位等信息随时补充</li>
+      </ul>
+      <p><strong>导出</strong></p>
+      <ul>
+        <li><kbd>📊 导出 Excel</kbd>：5 个 sheet（行程/分类/基本信息/酒店/机票）</li>
+        <li><kbd>导出 JSON</kbd>：完整数据备份，可跨设备迁移</li>
+      </ul>
+      <p><strong>数据安全</strong></p>
+      <ul>
+        <li>所有数据保存在浏览器 <code>localStorage</code>，不上传</li>
+        <li>换浏览器/清理缓存前请先"导出 JSON"备份</li>
+      </ul>
+    `
+  });
+}
+function hideBanner(){state.bannerDismissed=true;save();$("info-banner").style.display="none"}
+function showBanner(msg){
+  if(state.bannerDismissed)return;
+  $("info-banner-msg").innerHTML=msg;
+  $("info-banner").style.display="block";
+}
+
+function save(){localStorage.setItem(STORAGE_KEY,JSON.stringify(state))}
+function load(){
+  try{
+    const raw=localStorage.getItem(STORAGE_KEY);
+    if(raw){
+      state=JSON.parse(raw);
+      if(!state.hotels)state.hotels=[];
+      if(!state.flights)state.flights=[];
+      if(!state.sortMode)state.sortMode="manual";
+      if(state.bannerDismissed===undefined)state.bannerDismissed=false;
+      if(state.locked===undefined)state.locked=false;
+      // 兼容旧 items 无 color / locked 字段
+      (state.days||[]).forEach(d=>(d.items||[]).forEach(i=>{
+        if(i.color===undefined)i.color="";
+        if(i.locked===undefined)i.locked=false;
+      }));
+      return true;
+    }
+  }catch(e){}
+  return false;
+}
+
+/* ============ meta binding ============ */
+["title","dest","start","end","people","currency"].forEach(k=>{
+  const el=$("meta-"+k);
+  el.addEventListener("input",()=>{
+    state.meta[k]= (k==="people") ? (parseInt(el.value)||1) : el.value;
+    save();renderStats();renderSplit();
+  });
+});
+function renderMeta(){
+  $("meta-title").value=state.meta.title||"";
+  $("meta-dest").value=state.meta.dest||"";
+  $("meta-start").value=state.meta.start||"";
+  $("meta-end").value=state.meta.end||"";
+  $("meta-people").value=state.meta.people||2;
+  $("meta-currency").value=state.meta.currency||"¥";
+}
+
+/* ============ day / item ops ============ */
+function addDay(date){
+  const idx=state.days.length+1;
+  state.days.push({id:uid(),date:date||"",label:"Day "+idx,items:[]});
+  save();renderAll();toast("已添加 Day "+idx,"success");
+}
+async function delDay(did){
+  const d=state.days.find(x=>x.id===did);if(!d)return;
+  const ok=await modalConfirm({title:"删除这一天？",message:`<p>将永久删除 <strong>${esc(d.label)}</strong> 以及该日下 <strong>${d.items.length}</strong> 条安排。此操作不可撤销。</p>`,okText:"确认删除",danger:true});
+  if(!ok)return;
+  state.days=state.days.filter(d=>d.id!==did);
+  // relabel
+  state.days.forEach((d,i)=>{if(/^Day \d+$/.test(d.label))d.label="Day "+(i+1)});
+  save();renderAll();toast("已删除","warning");
+}
+function addItem(did){
+  if(state.days.length===0)addDay();
+  const day = did ? state.days.find(d=>d.id===did) : state.days[state.days.length-1];
+  day.items.push({id:uid(),time:"",type:"其他",name:"",note:"",price:0,qty:1,done:false,color:"",locked:false});
+  save();renderAll();
+}
+function delItem(did,iid){
+  const d=state.days.find(x=>x.id===did);if(!d)return;
+  const it=d.items.find(i=>i.id===iid);
+  if(it&&it.locked){toast("此条目已锁定，请先解锁","warning");return}
+  d.items=d.items.filter(i=>i.id!==iid);
+  save();renderAll();
+}
+function updateItem(did,iid,field,value){
+  const d=state.days.find(x=>x.id===did);if(!d)return;
+  const it=d.items.find(i=>i.id===iid);if(!it)return;
+  if(field==="price"||field==="qty")value=parseFloat(value)||0;
+  if(field==="done")value=!!value;
+  it[field]=value;
+  save();renderRowTotals();renderStats();renderCharts();renderSplit();
+}
+function toggleDone(did,iid){
+  const d=state.days.find(x=>x.id===did);if(!d)return;
+  const it=d.items.find(i=>i.id===iid);if(!it)return;
+  if(it.locked){toast("此条目已锁定，请先解锁","warning");return}
+  it.done=!it.done;
+  save();renderPlan();renderStats();renderCharts();
+  toast(it.done?"已标记完成 ✓":"已标记未完成",it.done?"success":"warning");
+}
+
+/* ===== 颜色标记 ===== */
+const COLOR_PALETTE=[
+  {c:"#ef4444",n:"红 · 重要"},
+  {c:"#f97316",n:"橙 · 优先"},
+  {c:"#f59e0b",n:"黄 · 待确认"},
+  {c:"#10b981",n:"绿 · 已预订"},
+  {c:"#06b6d4",n:"青 · 备选"},
+  {c:"#3b82f6",n:"蓝 · 信息"},
+  {c:"#8b5cf6",n:"紫 · 纪念"},
+  {c:"#ec4899",n:"粉 · 惊喜"},
+];
+let _pickingCtx=null; // {dayId,itemId}
+function openColorPicker(did,iid,ev){
+  const d=state.days.find(x=>x.id===did);
+  const it=d&&d.items.find(i=>i.id===iid);
+  if(!it||it.locked)return;
+  ev&&ev.stopPropagation();
+  _pickingCtx={did,iid};
+  const current=it.color||"";
+  // 渲染色板
+  $("color-palette").innerHTML=COLOR_PALETTE.map(p=>
+    `<span class="color-swatch ${p.c===current?'active':''}" style="background:${p.c}" title="${p.n}" onclick="applyColor('${p.c}')"></span>`
+  ).join("");
+  $("color-custom").value=current||"#2563eb";
+  $("color-custom").onchange=(e)=>applyColor(e.target.value);
+  // 定位 popover
+  const pop=$("color-popover");
+  pop.classList.add("show");
+  const rect=ev&&ev.currentTarget.getBoundingClientRect();
+  if(rect){
+    let left=rect.left;
+    let top=rect.bottom+6;
+    // 防止越界
+    const pw=220,ph=130;
+    if(left+pw>window.innerWidth-10)left=window.innerWidth-pw-10;
+    if(top+ph>window.innerHeight-10)top=rect.top-ph-6;
+    pop.style.left=left+"px";pop.style.top=top+"px";
+  }
+}
+function applyColor(color){
+  if(!_pickingCtx)return;
+  const d=state.days.find(x=>x.id===_pickingCtx.did);
+  if(!d)return;
+  const it=d.items.find(i=>i.id===_pickingCtx.iid);
+  if(!it)return;
+  it.color=color||"";
+  save();renderPlan();
+  $("color-popover").classList.remove("show");
+  _pickingCtx=null;
+}
+// 点击外部关闭
+document.addEventListener("click",(e)=>{
+  const pop=$("color-popover");
+  if(!pop||!pop.classList.contains("show"))return;
+  if(pop.contains(e.target))return;
+  if(e.target.closest(".color-dot"))return;
+  pop.classList.remove("show");
+  _pickingCtx=null;
+});
+function updateDay(did,field,value){
+  const d=state.days.find(x=>x.id===did);if(!d)return;
+  d[field]=value;save();
+}
+
+/* ============ 排序 ============ */
+const TYPE_ORDER={"交通":0,"住宿":1,"餐饮":2,"门票":3,"娱乐":4,"购物":5,"其他":6};
+function sortItems(items){
+  const mode=state.sortMode||"manual";
+  if(mode==="manual")return items;
+  const arr=items.slice();
+  const byTime=(a,b)=>{
+    const at=a.time||"99:99",bt=b.time||"99:99";
+    return at.localeCompare(bt);
+  };
+  switch(mode){
+    case "time-asc":return arr.sort(byTime);
+    case "time-desc":return arr.sort((a,b)=>-byTime(a,b));
+    case "price-desc":return arr.sort((a,b)=>((b.price||0)*(b.qty||0))-((a.price||0)*(a.qty||0)));
+    case "price-asc":return arr.sort((a,b)=>((a.price||0)*(a.qty||0))-((b.price||0)*(b.qty||0)));
+    case "type":return arr.sort((a,b)=>(TYPE_ORDER[a.type]??9)-(TYPE_ORDER[b.type]??9)||byTime(a,b));
+    case "done":return arr.sort((a,b)=>((a.done?1:0)-(b.done?1:0))||byTime(a,b));
+    default:return arr;
+  }
+}
+function changeSort(mode){
+  state.sortMode=mode;save();renderPlan();
+  const name={"manual":"手动排序","time-asc":"时间升序","time-desc":"时间降序","price-desc":"金额高→低","price-asc":"金额低→高","type":"按类型分组","done":"未完成优先"}[mode]||mode;
+  toast("排序：" + name,"success");
+}
+
+/* ============ render ============ */
+function renderPlan(){
+  const tb=$("plan-body");tb.innerHTML="";
+  if(state.days.length===0){
+    tb.innerHTML=`<tr><td colspan="9" class="empty">🏖️ 还没有行程安排<br/><br/><button class="btn primary" onclick="addDay()">+ 添加第一天</button> &nbsp; <button class="btn" onclick="loadSample()">加载示例行程</button></td></tr>`;
+    return;
+  }
+  state.days.forEach(day=>{
+    const tr=document.createElement("tr");
+    tr.className="day-row";
+    tr.innerHTML=`<td colspan="9"><div class="day-row-content">
+      <input class="cell-input day-label-input" value="${esc(day.label)}" onchange="updateDay('${day.id}','label',this.value)" />
+      <input type="date" class="cell-input day-date-input" value="${day.date||""}" onchange="updateDay('${day.id}','date',this.value)" />
+      <span class="day-actions">
+        <button class="btn ghost" onclick="addItem('${day.id}')">+ 新增</button>
+        <button class="btn ghost" onclick="delDay('${day.id}')" style="color:var(--danger)">🗑 删除整天</button>
+      </span>
+    </div></td>`;
+    tb.appendChild(tr);
+
+    // ===== 当日总览（精简：仅交通 + 住宿）=====
+    const transports=day.items.filter(i=>i.type==="交通");
+    const stays=day.items.filter(i=>i.type==="住宿");
+    if(transports.length||stays.length){
+      const sumTr=document.createElement("tr");
+      sumTr.className="day-summary";
+      const transHtml=transports.length?`
+        <div class="sum-group">
+          <span class="sum-label sum-label-transit">🚆 交通</span>
+          <ul class="sum-list">
+            ${transports.map(i=>`<li><span class="sum-time">${i.time||"—"}</span><span class="sum-name">${esc(i.name||"未命名")}</span>${i.note?`<span class="sum-note">· ${esc(i.note)}</span>`:""}</li>`).join("")}
+          </ul>
+        </div>`:"";
+      const stayHtml=stays.length?`
+        <div class="sum-group">
+          <span class="sum-label sum-label-stay">🏨 住宿</span>
+          <ul class="sum-list">
+            ${stays.map(i=>`<li><span class="sum-name">${esc(i.name||"未命名")}</span>${i.note?`<span class="sum-note">· ${esc(i.note)}</span>`:""}</li>`).join("")}
+          </ul>
+        </div>`:"";
+      sumTr.innerHTML=`<td colspan="9"><div class="day-summary-inner">${transHtml}${stayHtml}</div></td>`;
+      tb.appendChild(sumTr);
+    }
+
+    day.items.length===0 && (()=>{
+      const er=document.createElement("tr");
+      er.innerHTML=`<td colspan="9" style="color:var(--muted);padding:10px 20px;font-size:12px">当天暂无安排，<a href="javascript:void(0)" onclick="addItem('${day.id}')" style="color:var(--primary)">点击添加</a></td>`;
+      tb.appendChild(er);
+    })();
+
+    sortItems(day.items).forEach(it=>{
+      const r=document.createElement("tr");
+      r.dataset.day=day.id;r.dataset.item=it.id;
+      if(it.locked)r.classList.add("item-locked");
+      if(it.done)r.classList.add("item-done");
+      // 左侧颜色条
+      if(it.color){r.style.boxShadow="inset 4px 0 0 0 "+it.color}
+      const subtotal=(Number(it.price)||0)*(Number(it.qty)||0);
+      r.innerHTML=`
+        <td class="col-color" style="padding-left:8px">
+          <button type="button" class="color-dot" style="${it.color?`background:${it.color};border-color:${it.color}`:''}" onclick="openColorPicker('${day.id}','${it.id}',event)" title="点击设置标记颜色">${it.color?'':'+'}</button>
+        </td>
+        <td><input class="cell-input" type="time" value="${it.time||""}" onchange="updateItem('${day.id}','${it.id}','time',this.value)"/></td>
+        <td>
+          <select class="cell-input" onchange="updateItem('${day.id}','${it.id}','type',this.value);renderPlan();">
+            ${TYPES.map(t=>`<option ${t===it.type?"selected":""}>${t}</option>`).join("")}
+          </select>
+        </td>
+        <td class="col-name-note">
+          <input class="cell-input name-input" placeholder="景点/酒店/餐厅/航班..." value="${esc(it.name)}" onchange="updateItem('${day.id}','${it.id}','name',this.value)"/>
+          <input class="cell-input note-input" placeholder="地址 · 联系方式 · 备注" value="${esc(it.note)}" onchange="updateItem('${day.id}','${it.id}','note',this.value)"/>
+        </td>
+        <td><input class="cell-input cost-input" type="number" min="0" step="0.01" value="${it.price||0}" onchange="updateItem('${day.id}','${it.id}','price',this.value)"/></td>
+        <td><input class="cell-input cost-input" type="number" min="0" step="1" value="${it.qty||1}" onchange="updateItem('${day.id}','${it.id}','qty',this.value)"/></td>
+        <td class="cost-input" style="padding-right:14px"><span class="subtotal">${fmt(subtotal)}</span></td>
+        <td style="text-align:center">
+          <button type="button" class="done-tag ${it.done?'is-done':'is-todo'}" onclick="toggleDone('${day.id}','${it.id}')" title="点击切换完成状态">${it.done?'✓ 已完成':'○ 未完成'}</button>
+        </td>
+        <td class="col-actions" style="white-space:nowrap">
+          <button class="lock-toggle ${it.locked?'is-locked':''}" onclick="toggleItemLock('${day.id}','${it.id}')" title="${it.locked?'已锁定 · 点击解锁':'点击锁定此条（防止误改）'}">${it.locked?'🔒':'🔓'}</button>
+          <button class="del-btn" onclick="delItem('${day.id}','${it.id}')" title="删除"${it.locked?' disabled style="opacity:.3;cursor:not-allowed"':''}>✕</button>
+        </td>`;
+      // type tag color on select
+      const sel=r.querySelector("select.cell-input");
+      sel.style.color=TYPE_COLORS[it.type]||"";
+      sel.style.fontWeight="500";
+      tb.appendChild(r);
+    });
+  });
+}
+
+function renderRowTotals(){
+  document.querySelectorAll("#plan-body tr[data-item]").forEach(tr=>{
+    const did=tr.dataset.day,iid=tr.dataset.item;
+    const d=state.days.find(x=>x.id===did);if(!d)return;
+    const it=d.items.find(x=>x.id===iid);if(!it)return;
+    tr.querySelector(".subtotal").textContent=fmt((it.price||0)*(it.qty||0));
+  });
+}
+
+function esc(s){return String(s||"").replace(/"/g,"&quot;").replace(/</g,"&lt;")}
+
+/* ============ stats ============ */
+function allItems(){return state.days.flatMap(d=>d.items.map(i=>({...i,_day:d})))}
+function total(){return allItems().reduce((s,i)=>s+(i.price||0)*(i.qty||0),0)}
+function calcDays(){
+  if(state.meta.start&&state.meta.end){
+    const a=new Date(state.meta.start),b=new Date(state.meta.end);
+    const d=Math.round((b-a)/86400000)+1;
+    return d>0?d:state.days.length||1;
+  }
+  return state.days.length||1;
+}
+
+function renderStats(){
+  const items=allItems();
+  const t=total();
+  const people=state.meta.people||1;
+  const days=calcDays();
+  $("stat-total").textContent=fmt(t);
+  $("stat-total-sub").textContent="共 "+items.length+" 项支出";
+  $("stat-perperson").textContent=fmt(t/people);
+  $("stat-perperson-sub").textContent="按 "+people+" 人均分";
+  $("stat-perday").textContent=fmt(t/days);
+  $("stat-perday-sub").textContent="共 "+days+" 天";
+
+  const doneCount=items.filter(i=>i.done).length;
+  $("stat-done").textContent=doneCount+" / "+items.length;
+  const pct=items.length?Math.round(doneCount/items.length*100):0;
+  $("stat-done-sub").textContent="完成度 "+pct+"%";
+
+  // top category
+  const byType={};
+  items.forEach(i=>{const v=(i.price||0)*(i.qty||0);byType[i.type]=(byType[i.type]||0)+v});
+  const sorted=Object.entries(byType).sort((a,b)=>b[1]-a[1]);
+  if(sorted.length&&sorted[0][1]>0){
+    $("stat-top").textContent=sorted[0][0];
+    $("stat-top-sub").textContent=fmt(sorted[0][1])+" · 占比 "+(t?Math.round(sorted[0][1]/t*100):0)+"%";
+  }else{
+    $("stat-top").textContent="—";$("stat-top-sub").textContent="—";
+  }
+}
+
+/* ============ charts ============ */
+let chartCat,chartDay;
+function renderCharts(){
+  const items=allItems();
+  // category
+  const byType={};
+  TYPES.forEach(t=>byType[t]=0);
+  items.forEach(i=>{byType[i.type]=(byType[i.type]||0)+(i.price||0)*(i.qty||0)});
+  const labels=Object.keys(byType).filter(k=>byType[k]>0);
+  const data=labels.map(k=>byType[k]);
+  const colors=labels.map(k=>TYPE_COLORS[k]);
+  const ctx=$("chart-category").getContext("2d");
+  if(chartCat)chartCat.destroy();
+  if(labels.length===0){
+    ctx.clearRect(0,0,ctx.canvas.width,ctx.canvas.height);
+    $("legend-category").innerHTML=`<div style="color:var(--muted);text-align:center">暂无支出数据</div>`;
+  }else{
+    // 按金额从大到小排序，横向柱状图更直观
+    const pairs=labels.map((k,i)=>({k,v:data[i],c:colors[i]})).sort((a,b)=>b.v-a.v);
+    const sLabels=pairs.map(p=>p.k);
+    const sData=pairs.map(p=>p.v);
+    const sColors=pairs.map(p=>p.c);
+    chartCat=new Chart(ctx,{
+      type:"bar",
+      data:{labels:sLabels,datasets:[{
+        data:sData,backgroundColor:sColors,borderRadius:6,
+        borderWidth:0,barThickness:22,
+      }]},
+      options:{
+        indexAxis:"y",responsive:true,maintainAspectRatio:false,
+        plugins:{
+          legend:{display:false},
+          tooltip:{callbacks:{label:c=>`${c.label}: ${fmt(c.parsed.x)}`}},
+        },
+        scales:{
+          x:{beginAtZero:true,ticks:{callback:v=>fmt(v),font:{size:11}},grid:{color:"#f1f5f9"}},
+          y:{ticks:{font:{size:12,weight:"500"}},grid:{display:false}}
+        }
+      }
+    });
+    const t=sData.reduce((a,b)=>a+b,0);
+    $("legend-category").innerHTML=sLabels.map((k,i)=>`
+      <div class="legend-item">
+        <div class="legend-left"><span class="legend-dot" style="background:${sColors[i]}"></span>${k}</div>
+        <div>${fmt(sData[i])} <span style="color:var(--muted)">· ${Math.round(sData[i]/t*100)}%</span></div>
+      </div>`).join("");
+  }
+
+  // day trend
+  const dayLabels=state.days.map(d=>d.label);
+  const daySums=state.days.map(d=>d.items.reduce((s,i)=>s+(i.price||0)*(i.qty||0),0));
+  const ctx2=$("chart-day").getContext("2d");
+  if(chartDay)chartDay.destroy();
+  chartDay=new Chart(ctx2,{
+    type:"bar",
+    data:{labels:dayLabels,datasets:[{
+      label:"每日花费",data:daySums,
+      backgroundColor:"rgba(37,99,235,.75)",borderRadius:6,
+    }]},
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmt(c.parsed.y)}}},
+      scales:{y:{beginAtZero:true,ticks:{callback:v=>fmt(v)}}}
+    }
+  });
+}
+
+/* ============ split ============ */
+function renderSplit(){
+  const p=state.meta.people||1;
+  const t=total();
+  const per=t/p;
+  const byType={};
+  allItems().forEach(i=>{const v=(i.price||0)*(i.qty||0);byType[i.type]=(byType[i.type]||0)+v});
+  let html=`<tr><td><strong>每人合计</strong></td><td><strong>${fmt(per)}</strong></td></tr>`;
+  TYPES.forEach(k=>{
+    if(byType[k]&&byType[k]>0){
+      html+=`<tr><td>${k} (人均)</td><td>${fmt(byType[k]/p)}</td></tr>`;
+    }
+  });
+  $("split-table").innerHTML=html;
+}
+
+/* ============ checklist ============ */
+function renderChecklist(){
+  if(!state.checklist||!state.checklist.length){
+    state.checklist=DEFAULT_CHECKLIST.map(t=>({text:t,done:false}));
+    save();
+  }
+  const box=$("checklist");
+  box.innerHTML=state.checklist.map((c,i)=>`
+    <label><input type="checkbox" ${c.done?"checked":""} onchange="toggleCheck(${i})"/>
+    <span style="${c.done?'text-decoration:line-through;color:var(--muted)':''}">${esc(c.text)}</span></label>
+  `).join("");
+}
+function toggleCheck(i){state.checklist[i].done=!state.checklist[i].done;save();renderChecklist();}
+
+/* ============ hotels ============ */
+function addHotel(){
+  state.hotels.push({id:uid(),name:"",city:"",checkin:"",checkout:"",nights:1,room:"",confirm:"",total:0,phone:""});
+  save();renderHotels();
+}
+async function delHotel(id){
+  const h=state.hotels.find(x=>x.id===id);
+  const ok=await modalConfirm({title:"删除酒店预订？",message:`<p>将删除 <strong>${esc(h&&h.name||"这条记录")}</strong></p>`,okText:"删除",danger:true});
+  if(!ok)return;
+  state.hotels=state.hotels.filter(h=>h.id!==id);save();renderHotels();toast("已删除","warning");
+}
+function updateHotel(id,field,value){
+  const h=state.hotels.find(x=>x.id===id);if(!h)return;
+  if(field==="nights"||field==="total")value=parseFloat(value)||0;
+  h[field]=value;
+  // auto-calc nights when both dates present
+  if(field==="checkin"||field==="checkout"){
+    if(h.checkin&&h.checkout){
+      const diff=Math.round((new Date(h.checkout)-new Date(h.checkin))/86400000);
+      if(diff>0)h.nights=diff;
+    }
+  }
+  save();renderHotels();
+}
+function renderHotels(){
+  const tb=$("hotel-body");tb.innerHTML="";
+  if(state.hotels.length===0){
+    tb.innerHTML=`<tr><td colspan="10" class="booking-empty">🏨 暂无酒店预订 · <a href="javascript:void(0)" onclick="addHotel()" style="color:var(--primary)">点此添加第一条</a></td></tr>`;
+    return;
+  }
+  state.hotels.forEach(h=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
+      <td><input class="cell-input" placeholder="酒店名称" value="${esc(h.name)}" onchange="updateHotel('${h.id}','name',this.value)"/></td>
+      <td><input class="cell-input" placeholder="城市/地址" value="${esc(h.city)}" onchange="updateHotel('${h.id}','city',this.value)"/></td>
+      <td><input class="cell-input" type="date" value="${h.checkin||""}" onchange="updateHotel('${h.id}','checkin',this.value)"/></td>
+      <td><input class="cell-input" type="date" value="${h.checkout||""}" onchange="updateHotel('${h.id}','checkout',this.value)"/></td>
+      <td><input class="cell-input cost-input" type="number" min="0" value="${h.nights||0}" onchange="updateHotel('${h.id}','nights',this.value)"/></td>
+      <td><input class="cell-input" placeholder="大床/双床..." value="${esc(h.room)}" onchange="updateHotel('${h.id}','room',this.value)"/></td>
+      <td><input class="cell-input" placeholder="确认号" value="${esc(h.confirm)}" onchange="updateHotel('${h.id}','confirm',this.value)"/></td>
+      <td><input class="cell-input cost-input" type="number" min="0" step="0.01" value="${h.total||0}" onchange="updateHotel('${h.id}','total',this.value)"/></td>
+      <td><input class="cell-input" placeholder="电话" value="${esc(h.phone)}" onchange="updateHotel('${h.id}','phone',this.value)"/></td>
+      <td class="col-actions"><button class="del-btn" onclick="delHotel('${h.id}')" title="删除">✕</button></td>`;
+    tb.appendChild(tr);
+  });
+}
+
+/* ============ flights ============ */
+function addFlight(){
+  state.flights.push({id:uid(),flightNo:"",airline:"",date:"",dep:"",arr:"",from:"",to:"",pnr:"",seat:"",price:0});
+  save();renderFlights();
+}
+async function delFlight(id){
+  const f=state.flights.find(x=>x.id===id);
+  const ok=await modalConfirm({title:"删除航班信息？",message:`<p>将删除 <strong>${esc(f&&f.flightNo||"这条记录")}</strong></p>`,okText:"删除",danger:true});
+  if(!ok)return;
+  state.flights=state.flights.filter(f=>f.id!==id);save();renderFlights();toast("已删除","warning");
+}
+function updateFlight(id,field,value){
+  const f=state.flights.find(x=>x.id===id);if(!f)return;
+  if(field==="price")value=parseFloat(value)||0;
+  f[field]=value;save();
+}
+function renderFlights(){
+  const tb=$("flight-body");tb.innerHTML="";
+  if(state.flights.length===0){
+    tb.innerHTML=`<tr><td colspan="11" class="booking-empty">✈️ 暂无航班信息 · <a href="javascript:void(0)" onclick="addFlight()" style="color:var(--primary)">点此添加第一条</a></td></tr>`;
+    return;
+  }
+  state.flights.forEach(f=>{
+    const tr=document.createElement("tr");
+    tr.innerHTML=`
+      <td><input class="cell-input" placeholder="CZ305" value="${esc(f.flightNo)}" onchange="updateFlight('${f.id}','flightNo',this.value)"/></td>
+      <td><input class="cell-input" placeholder="航空公司" value="${esc(f.airline)}" onchange="updateFlight('${f.id}','airline',this.value)"/></td>
+      <td><input class="cell-input" type="date" value="${f.date||""}" onchange="updateFlight('${f.id}','date',this.value)"/></td>
+      <td><input class="cell-input" type="time" value="${f.dep||""}" onchange="updateFlight('${f.id}','dep',this.value)"/></td>
+      <td><input class="cell-input" type="time" value="${f.arr||""}" onchange="updateFlight('${f.id}','arr',this.value)"/></td>
+      <td><input class="cell-input" placeholder="CAN" value="${esc(f.from)}" onchange="updateFlight('${f.id}','from',this.value)"/></td>
+      <td><input class="cell-input" placeholder="AKL" value="${esc(f.to)}" onchange="updateFlight('${f.id}','to',this.value)"/></td>
+      <td><input class="cell-input" placeholder="PNR" value="${esc(f.pnr)}" onchange="updateFlight('${f.id}','pnr',this.value)"/></td>
+      <td><input class="cell-input" placeholder="12A" value="${esc(f.seat)}" onchange="updateFlight('${f.id}','seat',this.value)"/></td>
+      <td><input class="cell-input cost-input" type="number" min="0" step="0.01" value="${f.price||0}" onchange="updateFlight('${f.id}','price',this.value)"/></td>
+      <td class="col-actions"><button class="del-btn" onclick="delFlight('${f.id}')" title="删除">✕</button></td>`;
+    tb.appendChild(tr);
+  });
+}
+
+/* ============ render all ============ */
+function renderAll(){renderMeta();renderPlan();renderStats();renderCharts();renderSplit();renderChecklist();renderHotels();renderFlights();}
+
+/* ============ sample ============ */
+async function loadSample(){
+  if(state.days.length){
+    const ok=await modalConfirm({title:"加载示例行程？",message:`<p>当前已有行程数据，加载示例会<strong>覆盖当前数据</strong>。</p><p>示例：日本关西 5 日游（大阪 / 京都 / 奈良）</p>`,okText:"覆盖并加载",danger:true});
+    if(!ok)return;
+  }
+  const _keepBanner=state.bannerDismissed;
+  state={
+    meta:{title:"日本关西 5 日游",dest:"大阪、京都、奈良",start:"2026-05-01",end:"2026-05-05",people:2,currency:"¥"},
+    days:[
+      {id:uid(),date:"2026-05-01",label:"Day 1 · 抵达大阪",items:[
+        {id:uid(),time:"08:00",type:"交通",name:"上海→大阪 机票",note:"春秋航空 9C8515",price:1800,qty:2,done:true},
+        {id:uid(),time:"14:00",type:"交通",name:"关空特急 Haruka",note:"关西机场→难波",price:160,qty:2,done:false},
+        {id:uid(),time:"15:30",type:"住宿",name:"大阪难波酒店",note:"难波 Nankai 酒店 · 3 晚",price:680,qty:3,done:true},
+        {id:uid(),time:"19:00",type:"餐饮",name:"一兰拉面 道顿堀店",note:"特制豚骨拉面",price:80,qty:2,done:false},
+      ]},
+      {id:uid(),date:"2026-05-02",label:"Day 2 · 大阪市内",items:[
+        {id:uid(),time:"09:00",type:"门票",name:"大阪城天守阁",note:"成人门票",price:40,qty:2,done:false},
+        {id:uid(),time:"12:00",type:"餐饮",name:"道顿堀章鱼烧",note:"午餐 + 小吃",price:60,qty:2,done:false},
+        {id:uid(),time:"14:00",type:"娱乐",name:"环球影城 USJ",note:"含快速通行券 3",price:650,qty:2,done:false},
+        {id:uid(),time:"20:00",type:"餐饮",name:"和牛烧肉",note:"黑毛和牛套餐",price:280,qty:2,done:false},
+      ]},
+      {id:uid(),date:"2026-05-03",label:"Day 3 · 京都一日",items:[
+        {id:uid(),time:"08:30",type:"交通",name:"JR 京都线",note:"大阪→京都 往返",price:50,qty:2,done:false},
+        {id:uid(),time:"10:00",type:"门票",name:"伏见稻荷大社",note:"免费参观",price:0,qty:2,done:false},
+        {id:uid(),time:"13:00",type:"餐饮",name:"京都怀石料理",note:"祗园老店",price:380,qty:2,done:false},
+        {id:uid(),time:"15:00",type:"门票",name:"清水寺",note:"成人门票",price:25,qty:2,done:false},
+        {id:uid(),time:"18:00",type:"购物",name:"祗园四条伴手礼",note:"抹茶、和果子",price:500,qty:1,done:false},
+      ]},
+      {id:uid(),date:"2026-05-04",label:"Day 4 · 奈良小鹿",items:[
+        {id:uid(),time:"09:00",type:"交通",name:"近铁难波→奈良",note:"往返车票",price:45,qty:2,done:false},
+        {id:uid(),time:"10:30",type:"门票",name:"东大寺",note:"含大佛殿",price:35,qty:2,done:false},
+        {id:uid(),time:"12:30",type:"餐饮",name:"奈良本地定食",note:"柿叶寿司",price:90,qty:2,done:false},
+        {id:uid(),time:"14:00",type:"娱乐",name:"奈良公园喂鹿",note:"鹿饼 200日元/份",price:20,qty:5,done:false},
+      ]},
+      {id:uid(),date:"2026-05-05",label:"Day 5 · 返程",items:[
+        {id:uid(),time:"10:00",type:"购物",name:"心斋桥最后血拼",note:"药妆 + 电器",price:1500,qty:1,done:false},
+        {id:uid(),time:"14:00",type:"交通",name:"机场大巴",note:"难波→关空",price:100,qty:2,done:false},
+        {id:uid(),time:"18:00",type:"交通",name:"大阪→上海 机票",note:"已含往返",price:0,qty:2,done:false},
+      ]},
+    ],
+    hotels:[
+      {id:uid(),name:"难波 Nankai 酒店",city:"大阪 · 难波",checkin:"2026-05-01",checkout:"2026-05-04",nights:3,room:"双床房",confirm:"",total:2040,phone:"+81 6-6644-1111"},
+    ],
+    flights:[
+      {id:uid(),flightNo:"9C8515",airline:"春秋航空",date:"2026-05-01",dep:"08:00",arr:"12:30",from:"上海浦东 PVG",to:"大阪关西 KIX",pnr:"",seat:"",price:1800},
+      {id:uid(),flightNo:"9C8516",airline:"春秋航空",date:"2026-05-05",dep:"18:00",arr:"20:30",from:"大阪关西 KIX",to:"上海浦东 PVG",pnr:"",seat:"",price:0},
+    ],
+    checklist:DEFAULT_CHECKLIST.map(t=>({text:t,done:false}))
+  };
+  state.bannerDismissed=_keepBanner;state.sortMode=state.sortMode||"manual";
+  save();renderAll();toast("示例行程已加载 ✓","success");
+}
+
+async function clearAll(){
+  const ok=await modalConfirm({title:"⚠️ 清空所有数据",message:`<p>将清空当前所有行程、酒店、机票和出行清单。</p><p style="color:var(--danger)">此操作不可撤销，请先通过"导出 JSON"备份。</p>`,okText:"确认清空",danger:true});
+  if(!ok)return;
+  state={meta:{title:"",dest:"",start:"",end:"",people:2,currency:"¥"},days:[],hotels:[],flights:[],checklist:[],sortMode:"manual",bannerDismissed:state.bannerDismissed};
+  save();renderAll();toast("已清空","warning");
+}
+
+/* ============ 新西兰 10 日游（小霸王 & 胖胖） ============ */
+async function loadNZTrip(){
+  if(state.days.length){
+    const ok=await modalConfirm({title:"导入新西兰行程？",message:`<p>将覆盖当前数据，导入<strong>「新西兰南北岛 10 日游」</strong>（2026/4/24 - 5/3，2 人）。</p><p>内含 10 天行程 · 7 条酒店预订 · 4 段航班信息 · 18 项出行清单。</p>`,okText:"覆盖并导入",danger:true});
+    if(!ok)return;
+  }
+  const _keepBanner=state.bannerDismissed;
+  // 汇率按原文 1 NZD ≈ 4.3 RMB；预算区间取中值
+  state={
+    meta:{title:"小霸王 & 胖胖 · 新西兰中土世界南北岛 10 日游",dest:"奥克兰 · 罗托鲁瓦 · 皇后镇 · 瓦纳卡 · 库克山 · 特卡波 · 基督城",start:"2026-04-24",end:"2026-05-03",people:2,currency:"¥"},
+    days:[
+      {id:uid(),date:"2026-04-24",label:"Day 1 · 抵达奥克兰",items:[
+        {id:uid(),time:"14:00",type:"交通",name:"广州→奥克兰 南航 CZ305",note:"国际机票（往返均价/人）· 实际区间 ¥23,650-30,100 / 2人",price:13437,qty:2,done:false,color:"#ef4444"},
+        {id:uid(),time:"16:00",type:"交通",name:"Hertz SUV 提车（奥克兰机场）",note:"10 天租车 + 全险 + 油费均摊，按 10 天分摊 ¥7,310-8,170",price:775,qty:10,done:false},
+        {id:uid(),time:"17:30",type:"住宿",name:"JW Marriott Auckland",note:"千帆之都市中心 · 1 晚",price:1822,qty:1,done:false},
+        {id:uid(),time:"19:30",type:"娱乐",name:"高架桥港夜游 Viaduct Harbour",note:"南半球夜色漫步",price:0,qty:2,done:false},
+        {id:uid(),time:"20:00",type:"餐饮",name:"The Grove / Cassia 晚餐",note:"法式 Kiwi fusion 或现代印度菜 · 务必提前订位",price:600,qty:2,done:false},
+      ]},
+      {id:uid(),date:"2026-04-25",label:"Day 2 · 霍比屯 + 地热奇境",items:[
+        {id:uid(),time:"09:00",type:"交通",name:"奥克兰→玛塔玛塔自驾",note:"约 2 小时车程",price:0,qty:1,done:false},
+        {id:uid(),time:"11:00",type:"门票",name:"霍比特村 Hobbiton 导览",note:"中土世界夏尔郡 · 成人 NZD 99 ≈ ¥425",price:425,qty:2,done:false,color:"#ef4444"},
+        {id:uid(),time:"14:00",type:"交通",name:"玛塔玛塔→罗托鲁瓦自驾",note:"约 1.5 小时",price:0,qty:1,done:false},
+        {id:uid(),time:"16:00",type:"门票",name:"Te Puia 间歇泉 + 毛利文化村",note:"傍晚 Pohutu 间歇泉喷发",price:344,qty:2,done:false},
+        {id:uid(),time:"18:30",type:"餐饮",name:"毛利杭吉 Hangi 餐 + 表演",note:"传统地热烹饪",price:500,qty:2,done:false},
+        {id:uid(),time:"21:00",type:"娱乐",name:"波利尼西亚温泉 Polynesian Spa",note:"湖畔地热温泉",price:180,qty:2,done:false},
+        {id:uid(),time:"22:00",type:"住宿",name:"Pullman Rotorua",note:"1 晚",price:1505,qty:1,done:false},
+      ]},
+      {id:uid(),date:"2026-04-26",label:"Day 3 · 飞跃南岛 皇后镇",items:[
+        {id:uid(),time:"10:00",type:"交通",name:"罗托鲁瓦→奥克兰机场还车",note:"自驾约 3 小时",price:0,qty:1,done:false},
+        {id:uid(),time:"14:00",type:"交通",name:"新西兰航空 AKL→ZQN",note:"国内段 · 区间 ¥2,365-2,795 / 2人",price:1290,qty:2,done:false},
+        {id:uid(),time:"16:30",type:"交通",name:"Hertz 皇后镇重新提车",note:"南岛自驾第二段",price:0,qty:1,done:false},
+        {id:uid(),time:"18:00",type:"住宿",name:"Hilton Queenstown Resort & Spa",note:"瓦卡蒂普湖畔 · 连住 3 晚",price:1978,qty:3,done:false},
+        {id:uid(),time:"20:00",type:"餐饮",name:"湖畔晚餐",note:"Fergburger 或湖景餐厅",price:300,qty:2,done:false},
+      ]},
+      {id:uid(),date:"2026-04-27",label:"Day 4 · 天空缆车 & 蒸汽船",items:[
+        {id:uid(),time:"09:30",type:"娱乐",name:"Skyline Gondola + Luge 滑板车",note:"俯瞰皇后镇全景 · NZD 89 / 人",price:383,qty:2,done:false},
+        {id:uid(),time:"14:00",type:"娱乐",name:"TSS Earnslaw 百年蒸汽船",note:"瓦卡蒂普湖巡游 · NZD 95 / 人",price:409,qty:2,done:false},
+        {id:uid(),time:"16:00",type:"购物",name:"皇后镇市中心购物",note:"Patagonia、冰川矿物美妆",price:800,qty:1,done:false},
+        {id:uid(),time:"19:00",type:"餐饮",name:"Amisfield 酒庄 3 帽晚餐",note:"或 Rātā · 顶级体验，务必预订",price:1200,qty:2,done:false},
+      ]},
+      {id:uid(),date:"2026-04-28",label:"Day 5 · 米尔福德峡湾 / 格林诺奇",items:[
+        {id:uid(),time:"07:00",type:"娱乐",name:"RealNZ 米尔福德峡湾 1 日游",note:"方案 A：大巴 + 游船（含午餐）· NZD 229 / 人；方案 B：格林诺奇魔戒森林自驾",price:985,qty:2,done:false,color:"#f59e0b"},
+        {id:uid(),time:"19:30",type:"餐饮",name:"皇后镇晚餐",note:"Fishbone 海鲜或 The Bunker",price:400,qty:2,done:false},
+      ]},
+      {id:uid(),date:"2026-04-29",label:"Day 6 · 孤独的树 瓦纳卡",items:[
+        {id:uid(),time:"09:00",type:"交通",name:"皇后镇→瓦纳卡 皇冠山脉公路",note:"约 1.5 小时绝美山路",price:0,qty:1,done:false},
+        {id:uid(),time:"11:00",type:"娱乐",name:"#ThatWanakaTree 打卡",note:"瓦纳卡湖中孤树",price:0,qty:2,done:false},
+        {id:uid(),time:"14:00",type:"娱乐",name:"Rippon 酒庄品酒",note:"湖景日落 · 品酒 NZD 20 / 人",price:86,qty:2,done:false},
+        {id:uid(),time:"19:00",type:"餐饮",name:"Kika 或 Bistro Gentil 晚餐",note:"瓦纳卡顶级餐厅",price:500,qty:2,done:false},
+        {id:uid(),time:"21:00",type:"住宿",name:"Edgewater Hotel Wanaka",note:"湖畔度假村 · 1 晚",price:1462,qty:1,done:false},
+      ]},
+      {id:uid(),date:"2026-04-30",label:"Day 7 · 库克山 胡克谷",items:[
+        {id:uid(),time:"09:00",type:"交通",name:"瓦纳卡→库克山自驾",note:"约 3.5 小时 · 途经普卡基湖观景点",price:0,qty:1,done:false},
+        {id:uid(),time:"14:00",type:"娱乐",name:"胡克谷步道 Hooker Valley Track",note:"往返 3 小时，终点冰川湖",price:0,qty:2,done:false},
+        {id:uid(),time:"19:00",type:"餐饮",name:"Hermitage Alpine Buffet",note:"雪山景观自助晚餐",price:600,qty:2,done:false},
+        {id:uid(),time:"21:00",type:"住宿",name:"The Hermitage Hotel",note:"库克山国家公园唯一酒店 · 1 晚",price:1720,qty:1,done:false},
+      ]},
+      {id:uid(),date:"2026-05-01",label:"Day 8 · 特卡波观星",items:[
+        {id:uid(),time:"09:30",type:"交通",name:"库克山→特卡波自驾",note:"约 1.5 小时 · 普卡基湖停留",price:0,qty:1,done:false},
+        {id:uid(),time:"11:00",type:"门票",name:"好牧羊人教堂",note:"牛奶蓝湖畔",price:0,qty:2,done:false},
+        {id:uid(),time:"14:00",type:"娱乐",name:"Tekapo Springs 温泉",note:"湖景温泉放松",price:344,qty:2,done:false},
+        {id:uid(),time:"21:00",type:"娱乐",name:"约翰山天文台观星 Dark Sky",note:"世界黑暗天空保护区 · NZD 169 / 人",price:727,qty:2,done:false,color:"#8b5cf6"},
+        {id:uid(),time:"23:30",type:"住宿",name:"Peppers Bluewater Resort",note:"特卡波湖畔 · 1 晚",price:1548,qty:1,done:false},
+      ]},
+      {id:uid(),date:"2026-05-02",label:"Day 9 · 基督城花园",items:[
+        {id:uid(),time:"09:00",type:"交通",name:"特卡波→基督城自驾",note:"约 3 小时",price:0,qty:1,done:false},
+        {id:uid(),time:"14:00",type:"娱乐",name:"雅芳河 Punting 英式平底船",note:"NZD 35 / 人",price:150,qty:2,done:false},
+        {id:uid(),time:"15:30",type:"门票",name:"纸板大教堂 + 植物园",note:"免费参观",price:0,qty:2,done:false},
+        {id:uid(),time:"19:00",type:"餐饮",name:"Inati / 5th Street 晚餐",note:"基督城顶级餐厅 · 提前订位",price:1000,qty:2,done:false},
+        {id:uid(),time:"22:00",type:"住宿",name:"The Mayfair Christchurch",note:"精品酒店 · 1 晚",price:1485,qty:1,done:false},
+      ]},
+      {id:uid(),date:"2026-05-03",label:"Day 10 · 完美收官 回国",items:[
+        {id:uid(),time:"09:00",type:"交通",name:"基督城机场还车",note:"Hertz 南岛段结束",price:0,qty:1,done:false},
+        {id:uid(),time:"11:00",type:"交通",name:"新西兰航空 CHC→AKL",note:"国内段（已含在往返预算中）",price:0,qty:2,done:false},
+        {id:uid(),time:"15:00",type:"购物",name:"奥克兰机场免税店",note:"麦卢卡蜂蜜、羊绒、巧克力伴手礼",price:1500,qty:1,done:false},
+        {id:uid(),time:"19:00",type:"交通",name:"奥克兰→广州 南航 CZ305",note:"返程（已含在往返机票中）",price:0,qty:2,done:false},
+      ]},
+    ],
+    hotels:[
+      {id:uid(),name:"JW Marriott Auckland",city:"奥克兰市中心",checkin:"2026-04-24",checkout:"2026-04-25",nights:1,room:"Deluxe King",confirm:"",total:1822,phone:"+64 9-302-1111"},
+      {id:uid(),name:"Pullman Rotorua",city:"罗托鲁瓦",checkin:"2026-04-25",checkout:"2026-04-26",nights:1,room:"Superior Twin",confirm:"",total:1505,phone:"+64 7-348-1174"},
+      {id:uid(),name:"Hilton Queenstown Resort & Spa",city:"皇后镇 · 瓦卡蒂普湖畔",checkin:"2026-04-26",checkout:"2026-04-29",nights:3,room:"Lakeview King",confirm:"",total:5934,phone:"+64 3-450-9400"},
+      {id:uid(),name:"Edgewater Hotel Wanaka",city:"瓦纳卡湖畔",checkin:"2026-04-29",checkout:"2026-04-30",nights:1,room:"Lake View Suite",confirm:"",total:1462,phone:"+64 3-443-0011"},
+      {id:uid(),name:"The Hermitage Hotel",city:"库克山国家公园",checkin:"2026-04-30",checkout:"2026-05-01",nights:1,room:"Premium Plus",confirm:"",total:1720,phone:"+64 3-435-1809"},
+      {id:uid(),name:"Peppers Bluewater Resort",city:"特卡波湖畔",checkin:"2026-05-01",checkout:"2026-05-02",nights:1,room:"Lakeview Studio",confirm:"",total:1548,phone:"+64 3-680-7000"},
+      {id:uid(),name:"The Mayfair Christchurch",city:"基督城",checkin:"2026-05-02",checkout:"2026-05-03",nights:1,room:"Deluxe King",confirm:"",total:1485,phone:"+64 3-741-8000"},
+    ],
+    flights:[
+      {id:uid(),flightNo:"CZ305",airline:"中国南方航空",date:"2026-04-24",dep:"00:30",arr:"16:40",from:"广州 CAN",to:"奥克兰 AKL",pnr:"",seat:"",price:13437},
+      {id:uid(),flightNo:"NZ615",airline:"新西兰航空",date:"2026-04-26",dep:"14:00",arr:"15:50",from:"奥克兰 AKL",to:"皇后镇 ZQN",pnr:"",seat:"",price:1290},
+      {id:uid(),flightNo:"NZ542",airline:"新西兰航空",date:"2026-05-03",dep:"11:00",arr:"12:25",from:"基督城 CHC",to:"奥克兰 AKL",pnr:"",seat:"",price:0},
+      {id:uid(),flightNo:"CZ306",airline:"中国南方航空",date:"2026-05-03",dep:"19:00",arr:"02:30+1",from:"奥克兰 AKL",to:"广州 CAN",pnr:"",seat:"",price:0},
+    ],
+    checklist:[
+      {text:"护照（有效期 6 个月以上）",done:false},
+      {text:"新西兰电子签 NZeTA + IVL",done:false},
+      {text:"国际机票行程单（南航 CZ305）",done:false},
+      {text:"国内段电子票（AKL→ZQN / CHC→AKL）",done:false},
+      {text:"Hertz 租车确认单 + 中国驾照英译件",done:false},
+      {text:"9 晚酒店预订确认单（JW/Pullman/希尔顿/Hermitage/Peppers/Mayfair 等）",done:false},
+      {text:"霍比屯 4/25 场次门票",done:false},
+      {text:"米尔福德峡湾 RealNZ 预订",done:false},
+      {text:"约翰山天文台观星团预订",done:false},
+      {text:"顶级餐厅订位（The Grove / Amisfield / Inati）",done:false},
+      {text:"新西兰旅行保险",done:false},
+      {text:"NZD 现金 + 信用卡（Visa/Master）",done:false},
+      {text:"转换插头（澳标 I 型）",done:false},
+      {text:"防风防水外套（4-5 月南岛气温 0-15°C）",done:false},
+      {text:"徒步鞋（胡克谷步道用）",done:false},
+      {text:"相机 + 备用电池（星空长曝光）",done:false},
+      {text:"手机 eSIM / 当地电话卡",done:false},
+      {text:"防晒霜（新西兰紫外线强）",done:false},
+    ]
+  };
+  state.bannerDismissed=_keepBanner;state.sortMode=state.sortMode||"manual";
+  save();renderAll();toast("🇳🇿 新西兰 10 日游行程已导入 ✓","success");
+}
+
+/* ============ export ============ */
+function exportJSON(){
+  const blob=new Blob([JSON.stringify(state,null,2)],{type:"application/json"});
+  const a=document.createElement("a");
+  a.href=URL.createObjectURL(blob);
+  a.download=(state.meta.title||"travel-plan")+".json";
+  a.click();URL.revokeObjectURL(a.href);toast("JSON 已导出");
+}
+
+function exportExcel(){
+  const wb=XLSX.utils.book_new();
+  // Sheet 1: 行程明细
+  const rows=[["日次","日期","时间","类型","项目","详情","单价","数量","小计","完成","锁定","标记色"]];
+  state.days.forEach(d=>{
+    if(d.items.length===0){rows.push([d.label,d.date||"","","","（无安排）","","","","","","",""]);}
+    d.items.forEach(i=>{
+      rows.push([d.label,d.date||"",i.time||"",i.type,i.name,i.note,i.price||0,i.qty||0,(i.price||0)*(i.qty||0),i.done?"✓":"",i.locked?"🔒":"",i.color||""]);
+    });
+  });
+  // summary
+  rows.push([]);
+  rows.push(["总预算","","","","","",total(),"",total(),"","",""]);
+  rows.push(["人均",state.meta.people||1,"","","","","","",total()/(state.meta.people||1),"","",""]);
+  const ws1=XLSX.utils.aoa_to_sheet(rows);
+  ws1["!cols"]=[{wch:16},{wch:12},{wch:8},{wch:8},{wch:25},{wch:30},{wch:10},{wch:8},{wch:12},{wch:8},{wch:6},{wch:10}];
+  XLSX.utils.book_append_sheet(wb,ws1,"行程明细");
+
+  // Sheet 2: 分类汇总
+  const byType={};TYPES.forEach(t=>byType[t]=0);
+  allItems().forEach(i=>byType[i.type]+=(i.price||0)*(i.qty||0));
+  const t=total();
+  const r2=[["类型","金额","占比"]];
+  Object.entries(byType).forEach(([k,v])=>r2.push([k,v,t?(v/t*100).toFixed(1)+"%":"0%"]));
+  r2.push(["合计",t,"100%"]);
+  const ws2=XLSX.utils.aoa_to_sheet(r2);
+  ws2["!cols"]=[{wch:12},{wch:14},{wch:10}];
+  XLSX.utils.book_append_sheet(wb,ws2,"分类汇总");
+
+  // Sheet 3: 基本信息
+  const r3=[
+    ["行程名称",state.meta.title],
+    ["目的地",state.meta.dest],
+    ["出发日期",state.meta.start],
+    ["返程日期",state.meta.end],
+    ["出行人数",state.meta.people],
+    ["币种",state.meta.currency],
+    ["总天数",calcDays()],
+    ["总预算",t],
+    ["人均花费",t/(state.meta.people||1)],
+    ["日均花费",t/calcDays()],
+  ];
+  const ws3=XLSX.utils.aoa_to_sheet(r3);
+  ws3["!cols"]=[{wch:16},{wch:24}];
+  XLSX.utils.book_append_sheet(wb,ws3,"基本信息");
+
+  // Sheet 4: 酒店预订
+  if(state.hotels&&state.hotels.length){
+    const r4=[["酒店名称","城市/地址","入住","退房","晚数","房型","确认号","总价","联系方式"]];
+    state.hotels.forEach(h=>r4.push([h.name,h.city,h.checkin,h.checkout,h.nights,h.room,h.confirm,h.total,h.phone]));
+    const hotelTotal=state.hotels.reduce((s,h)=>s+(h.total||0),0);
+    r4.push([]);
+    r4.push(["合计","","","","","","",hotelTotal,""]);
+    const ws4=XLSX.utils.aoa_to_sheet(r4);
+    ws4["!cols"]=[{wch:26},{wch:20},{wch:12},{wch:12},{wch:6},{wch:18},{wch:18},{wch:10},{wch:18}];
+    XLSX.utils.book_append_sheet(wb,ws4,"酒店预订");
+  }
+
+  // Sheet 5: 机票预订
+  if(state.flights&&state.flights.length){
+    const r5=[["航班号","航司","日期","起飞","到达","出发地","目的地","订单号/PNR","座位","票价/人","总价"]];
+    state.flights.forEach(f=>r5.push([f.flightNo,f.airline,f.date,f.dep,f.arr,f.from,f.to,f.pnr,f.seat,f.price,(f.price||0)*(state.meta.people||1)]));
+    const flightTotal=state.flights.reduce((s,f)=>s+(f.price||0)*(state.meta.people||1),0);
+    r5.push([]);
+    r5.push(["合计","","","","","","","","","",flightTotal]);
+    const ws5=XLSX.utils.aoa_to_sheet(r5);
+    ws5["!cols"]=[{wch:10},{wch:16},{wch:12},{wch:8},{wch:8},{wch:16},{wch:16},{wch:14},{wch:8},{wch:10},{wch:12}];
+    XLSX.utils.book_append_sheet(wb,ws5,"机票预订");
+  }
+
+  const filename=(state.meta.title||"travel-plan")+".xlsx";
+  XLSX.writeFile(wb,filename);
+  toast("Excel 已导出 ✓");
+}
+
+/* ============ init ============ */
+if(!load()){
+  // fresh: put an empty skeleton
+  state.checklist=DEFAULT_CHECKLIST.map(t=>({text:t,done:false}));
+}
+// 同步排序下拉
+document.getElementById("sort-mode").value=state.sortMode||"manual";
+renderAll();
+// 首次打开展示使用提示条
+if(!state.bannerDismissed){
+  showBanner(`💡 <strong>提示：</strong>点单元格直接编辑 · 右上角"排序"可按时间/金额/类型排序 · 所有数据自动保存在本地 · 想了解更多？点标题旁的 <span style="display:inline-flex;width:18px;height:18px;border-radius:50%;background:#e0f2fe;color:#0369a1;align-items:center;justify-content:center;font-weight:600">ⓘ</span> 查看帮助`);
+}
+</script>
+</body>
+</html>
